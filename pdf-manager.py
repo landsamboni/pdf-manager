@@ -40,12 +40,12 @@ def clean_path(raw: str) -> str:
     return p
 
 
-def ask_pdf(prompt: str = "Arrastrá el PDF y presioná Enter") -> Path:
+def ask_pdf(prompt: str = "Arrastra el PDF y presiona Enter") -> Path:
     """Pide un PDF al usuario hasta que la ruta sea válida."""
     while True:
         raw = Prompt.ask(f"[cyan]{prompt}[/cyan]")
         if not raw.strip():
-            console.print("  [red]✗[/red] Ruta vacía, intentá de nuevo.")
+            console.print("  [red]✗[/red] Ruta vacía, intenta de nuevo.")
             continue
         path = Path(clean_path(raw))
         if not path.exists():
@@ -187,7 +187,7 @@ def split_pdf():
 
 def merge_pdf():
     console.print(Panel("[bold magenta]MERGE[/bold magenta] — Combinar PDFs", style="magenta"))
-    console.print("  Arrastrá los PDFs uno por uno. [dim]Enter en blanco para terminar.[/dim]\n")
+    console.print("  Arrastra los PDFs uno por uno. [dim]Enter en blanco para terminar.[/dim]\n")
 
     files: list[Path] = []
     idx = 1
@@ -267,7 +267,7 @@ def menu():
 
         console.print()
         console.rule("[dim]─[/dim]")
-        console.input("\n  Presioná [bold]Enter[/bold] para volver al menú... ")
+        console.input("\n  Presiona [bold]Enter[/bold] para volver al menú... ")
 
 
 if __name__ == "__main__":

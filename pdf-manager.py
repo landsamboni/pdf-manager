@@ -260,8 +260,14 @@ def menu():
         elif choice == "3":
             merge_pdf()
         elif choice == "0":
-            console.print("\n[dim]Bye Bye 👋[/dim]\n")
+            console.print("\n[dim]Chau. 👋[/dim]\n")
             break
+        else:
+            continue
+
+        console.print()
+        console.rule("[dim]─[/dim]")
+        console.input("\n  Presioná [bold]Enter[/bold] para volver al menú... ")
 
 
 if __name__ == "__main__":

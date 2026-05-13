@@ -15,7 +15,12 @@
       "Bash(pdf-manager)",
       "Bash(echo \"\")",
       "Bash(echo \"# pdf-manager alias\")",
-      "Bash(echo \"alias pdf-manager.py='pdf-manager'\")"
+      "Bash(echo \"alias pdf-manager.py='pdf-manager'\")",
+      "Bash(git -C /Users/leidycarolinaguanaritasolarte/dev/pdf-manager status)",
+      "Bash(git -C /Users/leidycarolinaguanaritasolarte/dev/pdf-manager diff)",
+      "Bash(git -C /Users/leidycarolinaguanaritasolarte/dev/pdf-manager add README.md install.sh)",
+      "Bash(git -C /Users/leidycarolinaguanaritasolarte/dev/pdf-manager commit -m ' *)",
+      "Bash(git *)"
     ]
   }
 }

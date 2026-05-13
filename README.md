@@ -1,23 +1,11 @@
 # pdf-manager
 
-CLI minimalista para gestionar archivos PDF desde la terminal.
+CLI y web UI para gestionar archivos PDF desde la terminal o el navegador.
 
-Permite:
-
-- 🔓 Desbloquear PDFs protegidos con contraseña
-- ✂️ Dividir PDFs por páginas o rangos
-- 📚 Combinar múltiples PDFs
-- 🖥️ Usar drag & drop directamente desde macOS Terminal
-
----
-
-## Características
-
-| Función | Descripción |
-|---|---|
-| **Unlock** | Elimina la contraseña de un PDF protegido |
-| **Split** | Divide un PDF en páginas individuales o por rangos personalizados |
-| **Merge** | Combina múltiples PDFs en un único archivo |
+- Desbloquear PDFs protegidos con contraseña
+- Dividir PDFs por páginas individuales o rangos personalizados
+- Combinar múltiples PDFs en uno solo
+- Interfaz web con drag & drop (modo `--web`)
 
 ---
 
@@ -26,42 +14,29 @@ Permite:
 - Python 3.10+
 - macOS / Linux
 
-Dependencias:
-
-- `pypdf`
-- `rich`
-
 ---
 
-# Instalación
+## Instalación
 
-## 1. Clonar el repositorio
+### 1. Clonar el repositorio
 
 ```bash
 git clone <repo-url>
 cd pdf-manager
 ```
 
----
-
-## 2. Ejecutar el instalador
+### 2. Ejecutar el instalador
 
 ```bash
 chmod +x install.sh
 ./install.sh
 ```
 
-El instalador automáticamente:
+El instalador crea un entorno virtual `.venv`, instala las dependencias y registra el comando `pdf-manager` en `~/bin`.
 
-- crea un entorno virtual (`.venv`)
-- instala dependencias
-- crea el comando global `pdf-manager`
+### 3. Verificar PATH (solo primera vez)
 
----
-
-## 3. Verificar PATH (solo primera vez)
-
-Si el comando no funciona:
+Si al ejecutar `pdf-manager` obtenés "command not found":
 
 ```bash
 echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
@@ -70,76 +45,56 @@ source ~/.zshrc
 
 ---
 
-# Uso
+## Uso
 
-Ejecutar desde cualquier directorio:
+### Modo CLI (terminal interactiva)
 
 ```bash
 pdf-manager
 ```
 
----
+Muestra un menú con las opciones Unlock, Split y Merge.
 
-## Ejemplos
+### Modo web (interfaz en el navegador)
 
-### Desbloquear PDF
-
-Seleccionar:
-
-```text
-1 -> Unlock
+```bash
+pdf-manager --web
 ```
 
-Ingresar:
-
-- archivo PDF
-- contraseña
-- nombre de salida
+Abre automáticamente `http://127.0.0.1:5000` en el navegador.  
+Presioná `Ctrl+C` para detener el servidor.
 
 ---
 
-### Dividir PDF
+## Ejemplos CLI
 
-Ejemplos de rangos válidos:
+### Unlock — quitar contraseña
 
-```text
+Seleccioná opción `1`, arrastrá el PDF a la terminal y escribí la contraseña.
+
+### Split — dividir
+
+Rangos válidos:
+
+```
 1-3
 1,4,7
 1-5,8,10-12
 ```
 
----
+### Merge — combinar
 
-### Combinar PDFs
-
-Seleccionar múltiples archivos PDF y generar un único documento final.
+Arrastrá los PDFs uno por uno. Enter en blanco cuando terminaste la lista.
 
 ---
 
-## Drag & Drop en macOS
+## Drag & drop en macOS
 
-Podés arrastrar archivos PDF directamente a la terminal.
-
-macOS automáticamente pegará la ruta completa del archivo.
+Podés arrastrar cualquier archivo PDF directamente a la ventana de terminal — macOS pega la ruta completa automáticamente.
 
 ---
 
-## Estructura del proyecto
-
-```text
-pdf-manager/
-├── install.sh
-├── pdf-manager.py
-├── requirements.txt
-├── README.md
-└── .gitignore
-```
-
----
-
-## Desarrollo
-
-Crear entorno virtual manualmente:
+## Desarrollo local
 
 ```bash
 python3 -m venv .venv
@@ -147,21 +102,45 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Ejecutar localmente:
+Ejecutar CLI:
 
 ```bash
 python3 pdf-manager.py
 ```
 
+Ejecutar servidor web:
+
+```bash
+python3 pdf-manager.py --web
+```
+
 ---
 
-## Próximas mejoras
+## Estructura del proyecto
 
-- [ ] Compresión de PDFs
-- [ ] Rotación de páginas
-- [ ] Extraer páginas específicas
-- [ ] Conversión imágenes → PDF
-- [ ] Empaquetado como comando real (`pipx` / Homebrew)
+```
+pdf-manager/
+├── pdf-manager.py      # Entrypoint: CLI y arranque del servidor web
+├── pdf_core.py         # Lógica de procesamiento PDF (compartida por CLI y web)
+├── web_app.py          # Servidor Flask con API REST
+├── templates/
+│   └── index.html      # Interfaz web
+├── requirements.txt
+├── Procfile            # Para deploy en plataformas como Render/Heroku
+├── install.sh
+└── README.md
+```
+
+---
+
+## Dependencias
+
+| Paquete | Uso |
+|---|---|
+| `pypdf` | Lectura y escritura de PDFs |
+| `rich` | Interfaz de terminal con colores |
+| `flask` | Servidor web |
+| `gunicorn` | Servidor WSGI para producción |
 
 ---
 

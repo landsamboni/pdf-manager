@@ -271,8 +271,16 @@ def menu():
 
 
 if __name__ == "__main__":
-    try:
-        menu()
-    except KeyboardInterrupt:
-        console.print("\n[dim]Interrumpido. Chau.[/dim]\n")
-        sys.exit(0)
+    if "--web" in sys.argv:
+        try:
+            from web_app import run as run_web
+        except ImportError:
+            console.print("[red]ERROR:[/red] falta Flask. Instalalo con: pip install flask")
+            sys.exit(1)
+        run_web()
+    else:
+        try:
+            menu()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Interrumpido. Chau.[/dim]\n")
+            sys.exit(0)

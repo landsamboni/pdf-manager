@@ -28,6 +28,8 @@ except ImportError:
     print("ERROR: falta la librería 'pypdf'. Instalala con: pip install pypdf")
     sys.exit(1)
 
+from pdf_core import MERGE_SUFFIXES, PDF_SUFFIX, WORD_SUFFIXES, merge_pdf_files, word_to_pdf_file
+
 console = Console()
 
 
@@ -53,6 +55,23 @@ def ask_pdf(prompt: str = "Arrastra el PDF y presiona Enter") -> Path:
             continue
         if not path.is_file() or path.suffix.lower() != ".pdf":
             console.print(f"  [red]✗[/red] No parece un PDF: [dim]{path}[/dim]")
+            continue
+        return path
+
+
+def ask_word(prompt: str = "Arrastra el documento Word y presiona Enter") -> Path:
+    """Pide un documento Word/Writer al usuario hasta que la ruta sea válida."""
+    while True:
+        raw = Prompt.ask(f"[cyan]{prompt}[/cyan]")
+        if not raw.strip():
+            console.print("  [red]✗[/red] Ruta vacía, intenta de nuevo.")
+            continue
+        path = Path(clean_path(raw))
+        if not path.exists():
+            console.print(f"  [red]✗[/red] No existe: [dim]{path}[/dim]")
+            continue
+        if not path.is_file() or path.suffix.lower() not in WORD_SUFFIXES:
+            console.print(f"  [red]✗[/red] No parece un documento Word compatible: [dim]{path}[/dim]")
             continue
         return path
 
@@ -186,20 +205,20 @@ def split_pdf():
 
 
 def merge_pdf():
-    console.print(Panel("[bold magenta]MERGE[/bold magenta] — Combinar PDFs", style="magenta"))
-    console.print("  Arrastra los PDFs uno por uno. [dim]Enter en blanco para terminar.[/dim]\n")
+    console.print(Panel("[bold magenta]MERGE[/bold magenta] — Combinar PDFs e imágenes", style="magenta"))
+    console.print("  Arrastra PDFs, PNGs o JPGs uno por uno. [dim]Enter en blanco para terminar.[/dim]\n")
 
     files: list[Path] = []
     idx = 1
     while True:
-        raw = Prompt.ask(f"  [cyan]PDF #{idx}[/cyan]", default="")
+        raw = Prompt.ask(f"  [cyan]Archivo #{idx}[/cyan]", default="")
         if not raw.strip():
             if not files:
                 console.print("  [dim]Sin archivos. Volviendo al menú.[/dim]")
                 return
             break
         path = Path(clean_path(raw))
-        if not path.exists() or path.suffix.lower() != ".pdf":
+        if not path.exists() or path.suffix.lower() not in MERGE_SUFFIXES:
             console.print(f"    [red]✗[/red] No válido: [dim]{path}[/dim]")
             continue
         files.append(path)
@@ -207,22 +226,47 @@ def merge_pdf():
         idx += 1
 
     if len(files) < 2:
-        console.print("  [red]✗[/red] Necesitás al menos 2 PDFs para combinar.")
+        console.print("  [red]✗[/red] Necesitás al menos 2 archivos para combinar.")
         return
 
-    writer = PdfWriter()
+    merge_inputs: list[tuple[Path, str]] = []
     for f in files:
+        password = ""
+        if f.suffix.lower() != PDF_SUFFIX:
+            merge_inputs.append((f, password))
+            continue
+
         reader = PdfReader(str(f))
         if reader.is_encrypted:
-            if not decrypt_reader(reader, f.name):
+            password = getpass.getpass(f"  Contraseña para {f.name} (no se mostrará): ")
+            try:
+                result = reader.decrypt(password)
+            except Exception as e:
+                console.print(f"  [red]✗[/red] Error al descifrar: {e}")
                 return
-        for page in reader.pages:
-            writer.add_page(page)
+            if result == 0:
+                console.print("  [red]✗[/red] Contraseña incorrecta.")
+                return
+        merge_inputs.append((f, password))
 
-    dst = output_path(files[0], "merged")
-    with open(dst, "wb") as f:
-        writer.write(f)
+    dst, err = merge_pdf_files(merge_inputs)
+    if err:
+        console.print(f"  [red]✗[/red] {err}")
+        return
     console.print(f"\n  [green]✓[/green] PDF combinado: [bold]{dst.name}[/bold]")
+    console.print(f"  [dim]Guardado en: {dst.parent}[/dim]")
+
+
+def word_to_pdf():
+    console.print(Panel("[bold green]WORD → PDF[/bold green] — Convertir documento Word a PDF", style="green"))
+    src = ask_word()
+
+    dst, err = word_to_pdf_file(src)
+    if err:
+        console.print(f"  [red]✗[/red] {err}")
+        return
+
+    console.print(f"  [green]✓[/green] PDF generado: [bold]{dst.name}[/bold]")
     console.print(f"  [dim]Guardado en: {dst.parent}[/dim]")
 
 
@@ -240,7 +284,10 @@ def menu():
         menu_text.append("dividir en páginas\n", style="dim")
         menu_text.append("  3  ", style="bold magenta")
         menu_text.append("Merge    ", style="magenta")
-        menu_text.append("combinar varios PDFs\n", style="dim")
+        menu_text.append("combinar PDFs e imágenes\n", style="dim")
+        menu_text.append("  4  ", style="bold green")
+        menu_text.append("Word PDF ", style="green")
+        menu_text.append("convertir Word a PDF\n", style="dim")
         menu_text.append("  0  ", style="bold red")
         menu_text.append("Salir", style="red")
 
@@ -251,7 +298,7 @@ def menu():
             padding=(1, 3),
         ))
 
-        choice = Prompt.ask("[bold]Opción[/bold]", choices=["0", "1", "2", "3"])
+        choice = Prompt.ask("[bold]Opción[/bold]", choices=["0", "1", "2", "3", "4"])
 
         if choice == "1":
             unlock_pdf()
@@ -259,6 +306,8 @@ def menu():
             split_pdf()
         elif choice == "3":
             merge_pdf()
+        elif choice == "4":
+            word_to_pdf()
         elif choice == "0":
             console.print("\n[dim]Chau. 👋[/dim]\n")
             break

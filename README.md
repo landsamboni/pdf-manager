@@ -4,7 +4,8 @@ CLI y web UI para gestionar archivos PDF desde la terminal o el navegador.
 
 - Desbloquear PDFs protegidos con contraseña
 - Dividir PDFs por páginas individuales o rangos personalizados
-- Combinar múltiples PDFs en uno solo
+- Combinar múltiples PDFs e imágenes PNG/JPG en uno solo
+- Convertir documentos Word a PDF
 - Interfaz web con drag & drop (modo `--web`)
 
 ---
@@ -54,6 +55,7 @@ pdf-manager
 ```
 
 Muestra un menú con las opciones Unlock, Split y Merge.
+También incluye Word PDF para convertir documentos compatibles.
 
 ### Modo web (interfaz en el navegador)
 
@@ -84,13 +86,19 @@ Rangos válidos:
 
 ### Merge — combinar
 
-Arrastrá los PDFs uno por uno. Enter en blanco cuando terminaste la lista.
+Arrastrá PDFs, PNGs o JPGs uno por uno. Enter en blanco cuando terminaste la lista.
+Las imágenes se agregan como páginas dentro del PDF final.
+
+### Word PDF — convertir
+
+Arrastrá un documento DOC, DOCX, RTF u ODT para convertirlo a PDF.
+Esta opción usa LibreOffice/soffice instalado en el sistema.
 
 ---
 
 ## Drag & drop en macOS
 
-Podés arrastrar cualquier archivo PDF directamente a la ventana de terminal — macOS pega la ruta completa automáticamente.
+Podés arrastrar cualquier archivo PDF o imagen compatible directamente a la ventana de terminal — macOS pega la ruta completa automáticamente.
 
 ---
 
@@ -138,9 +146,12 @@ pdf-manager/
 | Paquete | Uso |
 |---|---|
 | `pypdf` | Lectura y escritura de PDFs |
+| `Pillow` | Conversión de imágenes PNG/JPG a páginas PDF |
 | `rich` | Interfaz de terminal con colores |
 | `flask` | Servidor web |
 | `gunicorn` | Servidor WSGI para producción |
+
+La conversión de Word a PDF requiere LibreOffice instalado y disponible como `soffice` o `libreoffice`.
 
 ---
 

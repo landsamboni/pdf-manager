@@ -10,9 +10,8 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
 
-from pdf_core import merge_pdf_files, split_pdf_file, unlock_pdf_file
+from pdf_core import MERGE_SUFFIXES, WORD_SUFFIXES, merge_pdf_files, split_pdf_file, unlock_pdf_file, word_to_pdf_file
 
-import os
 import time
 
 TEMP_DIR = Path(tempfile.mkdtemp(prefix="pdf-manager-web-"))
@@ -89,10 +88,14 @@ def create_app() -> Flask:
     def api_merge():
         file_list = request.files.getlist("files")
         if len(file_list) < 2:
-            return jsonify(error="Se necesitan al menos 2 PDFs para combinar."), 400
+            return jsonify(error="Se necesitan al menos 2 archivos para combinar."), 400
 
         saved: list[tuple[Path, str]] = []
         for f in file_list:
+            if Path(f.filename).suffix.lower() not in MERGE_SUFFIXES:
+                for p, _ in saved:
+                    p.unlink(missing_ok=True)
+                return jsonify(error=f"Formato no soportado: {f.filename}"), 400
             p = TEMP_DIR / f"{uuid.uuid4().hex}_{f.filename}"
             f.save(str(p))
             saved.append((p, ""))
@@ -101,6 +104,25 @@ def create_app() -> Flask:
 
         for p, _ in saved:
             p.unlink(missing_ok=True)
+
+        if err:
+            return jsonify(error=err), 400
+        return jsonify(filename=dst.name, download_url=f"/download/{dst.name}")
+
+    @app.route("/api/word-to-pdf", methods=["POST"])
+    def api_word_to_pdf():
+        if "file" not in request.files:
+            return jsonify(error="No se recibió ningún archivo."), 400
+
+        f = request.files["file"]
+        if Path(f.filename).suffix.lower() not in WORD_SUFFIXES:
+            return jsonify(error="Formato no soportado. Usá DOC, DOCX, RTF u ODT."), 400
+
+        upload = TEMP_DIR / f"{uuid.uuid4().hex}_{f.filename}"
+        f.save(str(upload))
+
+        dst, err = word_to_pdf_file(upload, out_dir=TEMP_DIR)
+        upload.unlink(missing_ok=True)
 
         if err:
             return jsonify(error=err), 400

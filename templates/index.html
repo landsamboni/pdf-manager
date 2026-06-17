@@ -35,10 +35,14 @@ header p {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1.5rem;
-  max-width: 1060px;
+  max-width: 1380px;
   margin: 0 auto;
+}
+
+@media (max-width: 1120px) {
+  .grid { grid-template-columns: repeat(2, 1fr); max-width: 760px; }
 }
 
 @media (max-width: 820px) {
@@ -69,6 +73,7 @@ header p {
 #unlock .card-title { color: #d97706; }
 #split  .card-title { color: #0891b2; }
 #merge  .card-title { color: #9333ea; }
+#word   .card-title { color: #16a34a; }
 
 /* Drop zone */
 .drop-zone {
@@ -91,6 +96,7 @@ header p {
 #unlock .drop-zone:hover, #unlock .drop-zone.over { border-color: #d97706; }
 #split  .drop-zone:hover, #split  .drop-zone.over { border-color: #0891b2; }
 #merge  .drop-zone:hover, #merge  .drop-zone.over { border-color: #9333ea; }
+#word   .drop-zone:hover, #word   .drop-zone.over { border-color: #16a34a; }
 
 .drop-icon { font-size: 2rem; margin-bottom: 0.4rem; line-height: 1; }
 
@@ -174,6 +180,7 @@ header p {
 #unlock .btn { background: #d97706; }
 #split  .btn { background: #0891b2; }
 #merge  .btn { background: #9333ea; }
+#word   .btn { background: #16a34a; }
 
 /* Result area */
 .result {
@@ -328,19 +335,37 @@ header p {
   <div class="card" id="merge">
     <div class="card-header">
       <div class="card-title">🔗 Merge</div>
-      <div class="card-desc">Combinar varios PDFs en uno solo</div>
+      <div class="card-desc">Combinar PDFs e imágenes en uno solo</div>
     </div>
 
     <div class="drop-zone" id="merge-drop">
-      <input type="file" accept=".pdf" multiple id="merge-file">
+      <input type="file" accept=".pdf,.png,.jpg,.jpeg,image/png,image/jpeg" multiple id="merge-file">
       <div class="drop-icon">📄</div>
-      <div class="drop-hint">Arrastrá uno o más PDFs aquí<br>o hacé clic para seleccionar</div>
+      <div class="drop-hint">Arrastrá PDFs, PNGs o JPGs aquí<br>o hacé clic para seleccionar</div>
     </div>
 
     <ul class="merge-list" id="merge-list"></ul>
 
-    <button class="btn" id="merge-btn" onclick="doMerge()">Combinar PDFs</button>
+    <button class="btn" id="merge-btn" onclick="doMerge()">Combinar archivos</button>
     <div class="result" id="merge-result"></div>
+  </div>
+
+  <!-- ── WORD TO PDF ── -->
+  <div class="card" id="word">
+    <div class="card-header">
+      <div class="card-title">📝 Word PDF</div>
+      <div class="card-desc">Convertir DOC, DOCX, RTF u ODT a PDF</div>
+    </div>
+
+    <div class="drop-zone" id="word-drop">
+      <input type="file" accept=".doc,.docx,.rtf,.odt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" id="word-file">
+      <div class="drop-icon">📝</div>
+      <div class="drop-hint">Arrastrá el documento aquí<br>o hacé clic para seleccionar</div>
+      <div class="file-badge" id="word-badge"></div>
+    </div>
+
+    <button class="btn" id="word-btn" onclick="doWordToPdf()">Convertir a PDF</button>
+    <div class="result" id="word-result"></div>
   </div>
 
 </div>
@@ -350,6 +375,7 @@ header p {
 let unlockFile = null;
 let splitFile  = null;
 let mergeFiles = [];
+let wordFile   = null;
 
 // ── Drop zone helper ───────────────────────────────────────
 function setupDrop(dropId, inputId, multi, onFiles) {
@@ -360,7 +386,7 @@ function setupDrop(dropId, inputId, multi, onFiles) {
   // input covering the drop area with opacity:0 so it captures clicks natively)
 
   input.addEventListener('change', () => {
-    const files = Array.from(input.files).filter(isPDF);
+    const files = Array.from(input.files).filter(isSupportedForDrop(inputId));
     if (files.length) onFiles(files);
     input.value = '';
   });
@@ -370,12 +396,18 @@ function setupDrop(dropId, inputId, multi, onFiles) {
   drop.addEventListener('drop', e => {
     e.preventDefault();
     drop.classList.remove('over');
-    const files = Array.from(e.dataTransfer.files).filter(isPDF);
+    const files = Array.from(e.dataTransfer.files).filter(isSupportedForDrop(inputId));
     if (files.length) onFiles(files);
   });
 }
 
 function isPDF(f) { return f.name.toLowerCase().endsWith('.pdf'); }
+function isMergeFile(f) { return /\.(pdf|png|jpe?g)$/i.test(f.name); }
+function isWordFile(f) { return /\.(docx?|rtf|odt)$/i.test(f.name); }
+function isSupportedForDrop(inputId) {
+  if (inputId === 'word-file') return isWordFile;
+  return inputId === 'merge-file' ? isMergeFile : isPDF;
+}
 
 // ── UNLOCK ────────────────────────────────────────────────
 setupDrop('unlock-drop', 'unlock-file', false, files => {
@@ -461,7 +493,8 @@ function renderMergeList() {
   list.innerHTML = '';
   mergeFiles.forEach((f, i) => {
     const li = document.createElement('li');
-    li.innerHTML = `<span>📄 ${escHtml(f.name)}</span><button class="remove-btn" onclick="removeMerge(${i})">✕</button>`;
+    const icon = isPDF(f) ? '📄' : '🖼️';
+    li.innerHTML = `<span>${icon} ${escHtml(f.name)}</span><button class="remove-btn" onclick="removeMerge(${i})">✕</button>`;
     list.appendChild(li);
   });
 }
@@ -472,7 +505,7 @@ function removeMerge(idx) {
 }
 
 async function doMerge() {
-  if (mergeFiles.length < 2) return showErr('merge-result', 'Necesitás al menos 2 PDFs.');
+  if (mergeFiles.length < 2) return showErr('merge-result', 'Necesitás al menos 2 archivos.');
   const btn = document.getElementById('merge-btn');
 
   setLoading(btn, 'Combinando…');
@@ -489,7 +522,36 @@ async function doMerge() {
   } catch(e) {
     showErr('merge-result', e.message);
   } finally {
-    resetBtn(btn, 'Combinar PDFs');
+    resetBtn(btn, 'Combinar archivos');
+  }
+}
+
+// ── WORD TO PDF ───────────────────────────────────────────
+setupDrop('word-drop', 'word-file', false, files => {
+  wordFile = files[0];
+  showBadge('word-badge', wordFile.name);
+  clearResult('word-result');
+});
+
+async function doWordToPdf() {
+  if (!wordFile) return showErr('word-result', 'Seleccioná un documento primero.');
+  const btn = document.getElementById('word-btn');
+
+  setLoading(btn, 'Convirtiendo…');
+  clearResult('word-result');
+
+  const form = new FormData();
+  form.append('file', wordFile);
+
+  try {
+    const res  = await fetch('/api/word-to-pdf', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    showOK('word-result', data.filename, data.download_url);
+  } catch(e) {
+    showErr('word-result', e.message);
+  } finally {
+    resetBtn(btn, 'Convertir a PDF');
   }
 }
 

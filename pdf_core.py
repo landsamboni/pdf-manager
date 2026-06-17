@@ -4,11 +4,23 @@ Usada tanto por la CLI como por el servidor web.
 """
 
 import logging
+import shutil
+import subprocess
+import tempfile
+from io import BytesIO
 from pathlib import Path
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 from pypdf import PdfReader, PdfWriter
+
+PDF_SUFFIX = ".pdf"
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+MERGE_SUFFIXES = {PDF_SUFFIX, *IMAGE_SUFFIXES}
+WORD_SUFFIXES = {".doc", ".docx", ".rtf", ".odt"}
+LETTER_SIZE = (612, 792)
+IMAGE_PAGE_MARGIN = 72
+PDF_IMAGE_DPI = 300
 
 
 def _out_path(src_name: str, suffix: str, directory: Path) -> Path:
@@ -119,19 +131,78 @@ def split_pdf_file(
     return outputs, ""
 
 
+def word_to_pdf_file(src: Path, out_dir: Path = None) -> tuple[Path | None, str]:
+    """Convierte documentos Word/Writer a PDF usando LibreOffice/soffice."""
+    if src.suffix.lower() not in WORD_SUFFIXES:
+        return None, f"Formato no soportado: '{src.name}'. Usá DOC, DOCX, RTF u ODT."
+
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        return None, "No encontré LibreOffice/soffice. Instalá LibreOffice para convertir Word a PDF."
+
+    directory = out_dir or src.parent
+    dst = _out_path(src.name, "converted", directory)
+
+    with tempfile.TemporaryDirectory(prefix="pdf-manager-word-") as tmp:
+        tmp_dir = Path(tmp)
+        profile_dir = tmp_dir / "lo-profile"
+        try:
+            result = subprocess.run(
+                [
+                    soffice,
+                    "--headless",
+                    f"-env:UserInstallation=file://{profile_dir}",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(tmp_dir),
+                    str(src),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            return None, "LibreOffice tardó demasiado convirtiendo el documento."
+        except Exception as e:
+            return None, f"No se pudo ejecutar LibreOffice: {e}"
+
+        generated = tmp_dir / f"{src.stem}.pdf"
+        if result.returncode != 0 or not generated.exists():
+            details = (result.stderr or result.stdout or "").strip()
+            if details:
+                return None, f"No se pudo convertir '{src.name}' a PDF: {details}"
+            return None, f"No se pudo convertir '{src.name}' a PDF."
+
+        shutil.move(str(generated), str(dst))
+
+    return dst, ""
+
+
 def merge_pdf_files(
     files: list[tuple[Path, str]],
     out_dir: Path = None,
 ) -> tuple[Path | None, str]:
     """
     files: lista de (ruta, contraseña). Contraseña puede ser vacía.
+    Acepta PDFs e imágenes PNG/JPG/JPEG; cada imagen se agrega como una página.
     Devuelve (ruta_salida, error).
     """
     if len(files) < 2:
-        return None, "Se necesitan al menos 2 PDFs para combinar."
+        return None, "Se necesitan al menos 2 archivos para combinar."
 
     writer = PdfWriter()
     for src, password in files:
+        suffix = src.suffix.lower()
+        if suffix not in MERGE_SUFFIXES:
+            return None, f"Formato no soportado para merge: '{src.name}'."
+
+        if suffix in IMAGE_SUFFIXES:
+            err = _add_image_as_pdf_page(writer, src)
+            if err:
+                return None, err
+            continue
+
         reader = PdfReader(str(src))
         if reader.is_encrypted:
             if not password:
@@ -150,3 +221,58 @@ def merge_pdf_files(
     with open(dst, "wb") as f:
         writer.write(f)
     return dst, ""
+
+
+def _add_image_as_pdf_page(writer: PdfWriter, src: Path) -> str:
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return "Falta la librería Pillow. Instalá las dependencias con: pip install -r requirements.txt"
+
+    try:
+        with Image.open(src) as img:
+            img = ImageOps.exif_transpose(img)
+            page_img = _image_on_letter_page(img)
+            pdf_bytes = BytesIO()
+            page_img.save(pdf_bytes, format="PDF", resolution=float(PDF_IMAGE_DPI))
+    except Exception as e:
+        return f"No se pudo convertir la imagen '{src.name}' a PDF: {e}"
+
+    pdf_bytes.seek(0)
+    reader = PdfReader(pdf_bytes)
+    for page in reader.pages:
+        writer.add_page(page)
+    return ""
+
+
+def _image_on_letter_page(img):
+    from PIL import Image
+
+    image = _image_on_white_background(img)
+    scale = PDF_IMAGE_DPI / 72
+    canvas_size = (round(LETTER_SIZE[0] * scale), round(LETTER_SIZE[1] * scale))
+    margin = round(IMAGE_PAGE_MARGIN * scale)
+    canvas = Image.new("RGB", canvas_size, "white")
+    max_width = canvas_size[0] - (margin * 2)
+    max_height = canvas_size[1] - (margin * 2)
+
+    ratio = min(max_width / image.width, max_height / image.height)
+    target_size = (round(image.width * ratio), round(image.height * ratio))
+    if target_size != image.size:
+        image = image.resize(target_size, Image.Resampling.LANCZOS)
+
+    x = (canvas_size[0] - image.width) // 2
+    y = (canvas_size[1] - image.height) // 2
+    canvas.paste(image, (x, y))
+    return canvas
+
+
+def _image_on_white_background(img):
+    from PIL import Image
+
+    if img.mode in ("RGBA", "LA") or "transparency" in img.info:
+        rgba = img.convert("RGBA")
+        background = Image.new("RGB", rgba.size, "white")
+        background.paste(rgba, mask=rgba.getchannel("A"))
+        return background
+    return img.convert("RGB")

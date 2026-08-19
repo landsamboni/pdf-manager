@@ -13,6 +13,7 @@ from pathlib import Path
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 from pypdf import PdfReader, PdfWriter
+from pypdf.errors import DependencyError
 
 PDF_SUFFIX = ".pdf"
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
@@ -21,6 +22,18 @@ WORD_SUFFIXES = {".doc", ".docx", ".rtf", ".odt"}
 LETTER_SIZE = (612, 792)
 IMAGE_PAGE_MARGIN = 72
 PDF_IMAGE_DPI = 300
+
+CRYPTO_SUPPORT_ERROR = (
+    "Falta soporte criptográfico para procesar este PDF. "
+    "Reinstalá las dependencias con: .venv/bin/pip install -r requirements.txt"
+)
+
+
+def pdf_processing_error(action: str, error: Exception) -> str:
+    """Devuelve un mensaje entendible para errores producidos por pypdf."""
+    if isinstance(error, DependencyError):
+        return CRYPTO_SUPPORT_ERROR
+    return f"{action}: {error}"
 
 
 def _out_path(src_name: str, suffix: str, directory: Path) -> Path:
@@ -68,13 +81,16 @@ def unlock_pdf_file(src: Path, password: str, out_dir: Path = None) -> tuple[Pat
     if result == 0:
         return None, "Contraseña incorrecta."
 
-    writer = PdfWriter()
-    for page in reader.pages:
-        writer.add_page(page)
-
     dst = _out_path(src.name, "unlocked", out_dir or src.parent)
-    with open(dst, "wb") as f:
-        writer.write(f)
+    try:
+        writer = PdfWriter()
+        for page in reader.pages:
+            writer.add_page(page)
+        with open(dst, "wb") as f:
+            writer.write(f)
+    except Exception as e:
+        dst.unlink(missing_ok=True)
+        return None, pdf_processing_error("No se pudo desbloquear el PDF", e)
     return dst, ""
 
 
@@ -105,28 +121,35 @@ def split_pdf_file(
     directory = out_dir or src.parent
     outputs: list[Path] = []
 
-    if mode == "1":
-        for i, page in enumerate(reader.pages, start=1):
+    try:
+        if mode == "1":
+            for i, page in enumerate(reader.pages, start=1):
+                writer = PdfWriter()
+                writer.add_page(page)
+                dst = directory / f"{src.stem}_p{i:03d}.pdf"
+                with open(dst, "wb") as f:
+                    writer.write(f)
+                outputs.append(dst)
+        else:
+            if not spec.strip():
+                return [], "Indicá las páginas a extraer (ej: 1-3, 5)."
+            try:
+                pages = parse_ranges(spec, total)
+            except ValueError as e:
+                return [], str(e)
             writer = PdfWriter()
-            writer.add_page(page)
-            dst = directory / f"{src.stem}_p{i:03d}.pdf"
+            for n in pages:
+                writer.add_page(reader.pages[n - 1])
+            dst = _out_path(src.name, "split", directory)
             with open(dst, "wb") as f:
                 writer.write(f)
             outputs.append(dst)
-    else:
-        if not spec.strip():
-            return [], "Indicá las páginas a extraer (ej: 1-3, 5)."
-        try:
-            pages = parse_ranges(spec, total)
-        except ValueError as e:
-            return [], str(e)
-        writer = PdfWriter()
-        for n in pages:
-            writer.add_page(reader.pages[n - 1])
-        dst = _out_path(src.name, "split", directory)
-        with open(dst, "wb") as f:
-            writer.write(f)
-        outputs.append(dst)
+    except Exception as e:
+        for output in outputs:
+            output.unlink(missing_ok=True)
+        if "dst" in locals():
+            dst.unlink(missing_ok=True)
+        return [], pdf_processing_error("No se pudo dividir el PDF", e)
 
     return outputs, ""
 
@@ -213,13 +236,20 @@ def merge_pdf_files(
                 return None, f"Error al descifrar '{src.name}': {e}"
             if result == 0:
                 return None, f"Contraseña incorrecta para '{src.name}'."
-        for page in reader.pages:
-            writer.add_page(page)
+        try:
+            for page in reader.pages:
+                writer.add_page(page)
+        except Exception as e:
+            return None, pdf_processing_error(f"No se pudo procesar '{src.name}'", e)
 
     first = files[0][0]
     dst = _out_path(first.name, "merged", out_dir or first.parent)
-    with open(dst, "wb") as f:
-        writer.write(f)
+    try:
+        with open(dst, "wb") as f:
+            writer.write(f)
+    except Exception as e:
+        dst.unlink(missing_ok=True)
+        return None, pdf_processing_error("No se pudo crear el PDF combinado", e)
     return dst, ""
 
 

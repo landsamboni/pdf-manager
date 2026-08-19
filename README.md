@@ -145,7 +145,7 @@ pdf-manager/
 
 | Paquete | Uso |
 |---|---|
-| `pypdf` | Lectura y escritura de PDFs |
+| `pypdf[crypto]` | Lectura, escritura y descifrado AES de PDFs |
 | `Pillow` | Conversión de imágenes PNG/JPG a páginas PDF |
 | `rich` | Interfaz de terminal con colores |
 | `flask` | Servidor web |

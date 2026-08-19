@@ -25,10 +25,17 @@ except ImportError:
 try:
     from pypdf import PdfReader, PdfWriter
 except ImportError:
-    print("ERROR: falta la librería 'pypdf'. Instalala con: pip install pypdf")
+    print("ERROR: faltan dependencias PDF. Instalalas con: .venv/bin/pip install -r requirements.txt")
     sys.exit(1)
 
-from pdf_core import MERGE_SUFFIXES, PDF_SUFFIX, WORD_SUFFIXES, merge_pdf_files, word_to_pdf_file
+from pdf_core import (
+    MERGE_SUFFIXES,
+    PDF_SUFFIX,
+    WORD_SUFFIXES,
+    merge_pdf_files,
+    pdf_processing_error,
+    word_to_pdf_file,
+)
 
 console = Console()
 
@@ -138,13 +145,17 @@ def unlock_pdf():
     if not decrypt_reader(reader, src.name):
         return
 
-    writer = PdfWriter()
-    for page in reader.pages:
-        writer.add_page(page)
-
     dst = output_path(src, "unlocked")
-    with open(dst, "wb") as f:
-        writer.write(f)
+    try:
+        writer = PdfWriter()
+        for page in reader.pages:
+            writer.add_page(page)
+        with open(dst, "wb") as f:
+            writer.write(f)
+    except Exception as e:
+        dst.unlink(missing_ok=True)
+        console.print(f"  [red]✗[/red] {pdf_processing_error('No se pudo desbloquear el PDF', e)}")
+        return
     console.print(f"  [green]✓[/green] PDF desbloqueado: [bold]{dst.name}[/bold]")
     console.print(f"  [dim]Guardado en: {dst.parent}[/dim]")
 
@@ -169,39 +180,49 @@ def split_pdf():
 
     mode = Prompt.ask("  [cyan]Modo[/cyan]", choices=["1", "2"])
 
-    if mode == "1":
-        with Progress(
-            SpinnerColumn(),
-            "[progress.description]{task.description}",
-            BarColumn(),
-            TaskProgressColumn(),
-            console=console,
-        ) as progress:
-            task = progress.add_task("[cyan]Extrayendo páginas...", total=total)
-            for i, page in enumerate(reader.pages, start=1):
-                writer = PdfWriter()
-                writer.add_page(page)
-                dst = output_path(src, f"p{i:03d}")
-                with open(dst, "wb") as f:
-                    writer.write(f)
-                progress.advance(task)
-        console.print(f"\n  [green]✓[/green] {total} archivos creados en [bold]{src.parent}[/bold]")
+    created: list[Path] = []
+    try:
+        if mode == "1":
+            with Progress(
+                SpinnerColumn(),
+                "[progress.description]{task.description}",
+                BarColumn(),
+                TaskProgressColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task("[cyan]Extrayendo páginas...", total=total)
+                for i, page in enumerate(reader.pages, start=1):
+                    writer = PdfWriter()
+                    writer.add_page(page)
+                    dst = output_path(src, f"p{i:03d}")
+                    with open(dst, "wb") as f:
+                        writer.write(f)
+                    created.append(dst)
+                    progress.advance(task)
+            console.print(f"\n  [green]✓[/green] {total} archivos creados en [bold]{src.parent}[/bold]")
 
-    else:
-        spec = Prompt.ask("  [cyan]Páginas a extraer[/cyan]")
-        try:
-            pages = parse_ranges(spec, total)
-        except ValueError as e:
-            console.print(f"  [red]✗[/red] {e}")
-            return
-        writer = PdfWriter()
-        for n in pages:
-            writer.add_page(reader.pages[n - 1])
-        dst = output_path(src, "split")
-        with open(dst, "wb") as f:
-            writer.write(f)
-        console.print(f"  [green]✓[/green] PDF generado: [bold]{dst.name}[/bold]")
-        console.print(f"  [dim]Guardado en: {dst.parent}[/dim]")
+        else:
+            spec = Prompt.ask("  [cyan]Páginas a extraer[/cyan]")
+            try:
+                pages = parse_ranges(spec, total)
+            except ValueError as e:
+                console.print(f"  [red]✗[/red] {e}")
+                return
+            writer = PdfWriter()
+            for n in pages:
+                writer.add_page(reader.pages[n - 1])
+            dst = output_path(src, "split")
+            with open(dst, "wb") as f:
+                writer.write(f)
+            created.append(dst)
+            console.print(f"  [green]✓[/green] PDF generado: [bold]{dst.name}[/bold]")
+            console.print(f"  [dim]Guardado en: {dst.parent}[/dim]")
+    except Exception as e:
+        for output in created:
+            output.unlink(missing_ok=True)
+        if "dst" in locals() and dst not in created:
+            dst.unlink(missing_ok=True)
+        console.print(f"  [red]✗[/red] {pdf_processing_error('No se pudo dividir el PDF', e)}")
 
 
 def merge_pdf():

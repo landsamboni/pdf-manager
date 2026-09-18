@@ -5,6 +5,7 @@ pdf-manager — Unlock, split y merge de PDFs desde la terminal.
 
 import sys
 import getpass
+import shlex
 import logging
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -32,9 +33,12 @@ from pdf_core import (
     MERGE_SUFFIXES,
     PDF_SUFFIX,
     WORD_SUFFIXES,
+    IMAGE_SUFFIXES,
+    convert_to_pdf_file,
+    unlock_pdf_file,
     merge_pdf_files,
     pdf_processing_error,
-    word_to_pdf_file,
+    parse_ranges,
 )
 
 console = Console()
@@ -66,8 +70,8 @@ def ask_pdf(prompt: str = "Arrastra el PDF y presiona Enter") -> Path:
         return path
 
 
-def ask_word(prompt: str = "Arrastra el documento Word y presiona Enter") -> Path:
-    """Pide un documento Word/Writer al usuario hasta que la ruta sea válida."""
+def ask_word(prompt: str = "Arrastra una imagen o documento y presiona Enter") -> Path:
+    """Pide una imagen o documento compatible hasta que la ruta sea válida."""
     while True:
         raw = Prompt.ask(f"[cyan]{prompt}[/cyan]")
         if not raw.strip():
@@ -77,8 +81,8 @@ def ask_word(prompt: str = "Arrastra el documento Word y presiona Enter") -> Pat
         if not path.exists():
             console.print(f"  [red]✗[/red] No existe: [dim]{path}[/dim]")
             continue
-        if not path.is_file() or path.suffix.lower() not in WORD_SUFFIXES:
-            console.print(f"  [red]✗[/red] No parece un documento Word compatible: [dim]{path}[/dim]")
+        if not path.is_file() or path.suffix.lower() not in (WORD_SUFFIXES | IMAGE_SUFFIXES):
+            console.print(f"  [red]✗[/red] Usá PNG, JPG, JPEG, DOC, DOCX, RTF u ODT: [dim]{path}[/dim]")
             continue
         return path
 
@@ -94,27 +98,6 @@ def output_path(src: Path, suffix: str) -> Path:
         if not candidate.exists():
             return candidate
         i += 1
-
-
-def parse_ranges(spec: str, total_pages: int) -> list[int]:
-    """Convierte '1-3,5,8-10' en [1,2,3,5,8,9,10] (1-indexado)."""
-    pages = []
-    for part in spec.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            a, b = part.split("-", 1)
-            start, end = int(a), int(b)
-            if start < 1 or end > total_pages or start > end:
-                raise ValueError(f"Rango inválido: {part}")
-            pages.extend(range(start, end + 1))
-        else:
-            n = int(part)
-            if n < 1 or n > total_pages:
-                raise ValueError(f"Página fuera de rango: {n}")
-            pages.append(n)
-    return pages
 
 
 def decrypt_reader(reader: PdfReader, filename: str) -> bool:
@@ -134,30 +117,38 @@ def decrypt_reader(reader: PdfReader, filename: str) -> bool:
 # ---------- operaciones ----------
 
 def unlock_pdf():
-    console.print(Panel("[bold yellow]UNLOCK[/bold yellow] — Quitar contraseña de un PDF", style="yellow"))
-    src = ask_pdf()
-    reader = PdfReader(str(src))
-
-    if not reader.is_encrypted:
-        console.print("  [blue]ℹ[/blue] El PDF no está protegido. Nada que hacer.")
+    console.print(Panel("[bold yellow]UNLOCK[/bold yellow] — Uno o varios PDFs, una sola contraseña", style="yellow"))
+    console.print("  Arrastrá todos los PDFs juntos o agregalos en varias tandas. Enter vacío para continuar.")
+    console.print("  Cada resultado se guarda junto al original como nombre_unlocked.pdf, sin sobrescribir.\n")
+    files = []
+    while True:
+        raw = Prompt.ask("  [cyan]PDFs[/cyan]", default="")
+        if not raw.strip():
+            break
+        try:
+            paths = shlex.split(raw)
+        except ValueError:
+            console.print("  [red]Ruta inválida: revisá las comillas.[/red]")
+            continue
+        for value in paths:
+            path = Path(value).expanduser().resolve()
+            if not path.is_file() or path.suffix.lower() != ".pdf":
+                console.print(f"  No es un PDF válido: {path}", markup=False)
+            elif path not in files:
+                files.append(path)
+                console.print(f"  Agregado: {path.name}", markup=False)
+    if not files:
         return
-
-    if not decrypt_reader(reader, src.name):
-        return
-
-    dst = output_path(src, "unlocked")
-    try:
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
-        with open(dst, "wb") as f:
-            writer.write(f)
-    except Exception as e:
-        dst.unlink(missing_ok=True)
-        console.print(f"  [red]✗[/red] {pdf_processing_error('No se pudo desbloquear el PDF', e)}")
-        return
-    console.print(f"  [green]✓[/green] PDF desbloqueado: [bold]{dst.name}[/bold]")
-    console.print(f"  [dim]Guardado en: {dst.parent}[/dim]")
+    password = getpass.getpass("  Contraseña compartida (no se mostrará): ")
+    count = 0
+    for src in files:
+        dst, error = unlock_pdf_file(src, password)
+        if error:
+            console.print(f"  ✗ {src.name}: {error}", markup=False)
+        else:
+            count += 1
+            console.print(f"  ✓ Guardado: {dst}", markup=False)
+    console.print(f"\n  {count} de {len(files)} PDFs desbloqueados.")
 
 
 def split_pdf():
@@ -246,7 +237,7 @@ def merge_pdf():
         console.print(f"    [green]✓[/green] [dim]{path.name}[/dim]")
         idx += 1
 
-    if len(files) < 2:
+    if len(files) < 2 and files[0].suffix.lower() not in IMAGE_SUFFIXES:
         console.print("  [red]✗[/red] Necesitás al menos 2 archivos para combinar.")
         return
 
@@ -279,10 +270,10 @@ def merge_pdf():
 
 
 def word_to_pdf():
-    console.print(Panel("[bold green]WORD → PDF[/bold green] — Convertir documento Word a PDF", style="green"))
+    console.print(Panel("[bold green]CONVERTIR A PDF[/bold green] — Imagen centrada en carta o documento Word a PDF", style="green"))
     src = ask_word()
 
-    dst, err = word_to_pdf_file(src)
+    dst, err = convert_to_pdf_file(src)
     if err:
         console.print(f"  [red]✗[/red] {err}")
         return
@@ -307,8 +298,8 @@ def menu():
         menu_text.append("Merge    ", style="magenta")
         menu_text.append("combinar PDFs e imágenes\n", style="dim")
         menu_text.append("  4  ", style="bold green")
-        menu_text.append("Word PDF ", style="green")
-        menu_text.append("convertir Word a PDF\n", style="dim")
+        menu_text.append("A PDF    ", style="green")
+        menu_text.append("convertir imágenes o Word a PDF\n", style="dim")
         menu_text.append("  0  ", style="bold red")
         menu_text.append("Salir", style="red")
 

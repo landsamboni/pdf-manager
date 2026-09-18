@@ -278,23 +278,26 @@ header p {
   <div class="card" id="unlock">
     <div class="card-header">
       <div class="card-title">🔓 Unlock</div>
-      <div class="card-desc">Quitar contraseña de un PDF protegido</div>
+      <div class="card-desc">Arrastrá varios PDFs y escribí la contraseña una sola vez. Autorizá su carpeta original para guardar cada copia desbloqueada junto al original, sin ZIP ni sobrescrituras.</div>
     </div>
 
     <div class="drop-zone" id="unlock-drop">
-      <input type="file" accept=".pdf" id="unlock-file">
+      <input type="file" accept=".pdf" multiple id="unlock-file">
       <div class="drop-icon">📄</div>
-      <div class="drop-hint">Arrastrá el PDF aquí<br>o hacé clic para seleccionar</div>
+      <div class="drop-hint">Arrastrá uno o varios PDFs aquí<br>Usá la misma contraseña para todos</div>
       <div class="file-badge" id="unlock-badge"></div>
     </div>
 
+    <button class="btn" id="unlock-folder-btn" onclick="chooseUnlockFolder()">Autorizar carpeta original</button>
+    <p class="card-desc" id="unlock-folder-status">También podés elegir primero la carpeta para cargar sus PDFs. Si están en carpetas distintas, usá el modo terminal.</p>
+    <ul class="merge-list" id="unlock-list"></ul>
     <div class="field">
-      <label>Contraseña del PDF</label>
+      <label for="unlock-pass">Contraseña compartida por todos los PDFs</label>
       <input type="password" id="unlock-pass" placeholder="Ingresá la contraseña">
     </div>
 
     <button class="btn" id="unlock-btn" onclick="doUnlock()">Quitar contraseña</button>
-    <div class="result" id="unlock-result"></div>
+    <div class="result" role="status" aria-live="polite" id="unlock-result"></div>
   </div>
 
   <!-- ── SPLIT ── -->
@@ -327,15 +330,19 @@ header p {
       <input type="text" id="split-spec" placeholder="1-3, 5, 8-10">
     </div>
 
+    <div class="field">
+      <label for="split-pass">Contraseña (si el PDF está protegido)</label>
+      <input type="password" id="split-pass" placeholder="Opcional">
+    </div>
     <button class="btn" id="split-btn" onclick="doSplit()">Dividir PDF</button>
-    <div class="result" id="split-result"></div>
+    <div class="result" role="status" aria-live="polite" id="split-result"></div>
   </div>
 
   <!-- ── MERGE ── -->
   <div class="card" id="merge">
     <div class="card-header">
       <div class="card-title">🔗 Merge</div>
-      <div class="card-desc">Combinar PDFs e imágenes en uno solo</div>
+      <div class="card-desc">Combinar PDFs e imágenes, o convertir una imagen a PDF carta</div>
     </div>
 
     <div class="drop-zone" id="merge-drop">
@@ -347,32 +354,36 @@ header p {
     <ul class="merge-list" id="merge-list"></ul>
 
     <button class="btn" id="merge-btn" onclick="doMerge()">Combinar archivos</button>
-    <div class="result" id="merge-result"></div>
+    <div class="result" role="status" aria-live="polite" id="merge-result"></div>
   </div>
 
   <!-- ── WORD TO PDF ── -->
   <div class="card" id="word">
     <div class="card-header">
-      <div class="card-title">📝 Word PDF</div>
-      <div class="card-desc">Convertir DOC, DOCX, RTF u ODT a PDF</div>
+      <div class="card-title">🖼️ Convertir a PDF</div>
+      <div class="card-desc">PNG/JPG/JPEG o Word a PDF. Imágenes centradas en carta (21,59 × 27,94 cm), sin recortar y con margen de 2,54 cm.</div>
     </div>
 
     <div class="drop-zone" id="word-drop">
-      <input type="file" accept=".doc,.docx,.rtf,.odt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" id="word-file">
+      <input type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg,.doc,.docx,.rtf,.odt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" id="word-file">
       <div class="drop-icon">📝</div>
-      <div class="drop-hint">Arrastrá el documento aquí<br>o hacé clic para seleccionar</div>
+      <div class="drop-hint">Arrastrá una imagen o documento aquí<br>o hacé clic para seleccionar</div>
       <div class="file-badge" id="word-badge"></div>
     </div>
 
     <button class="btn" id="word-btn" onclick="doWordToPdf()">Convertir a PDF</button>
-    <div class="result" id="word-result"></div>
+    <div class="result" role="status" aria-live="polite" id="word-result"></div>
   </div>
 
 </div>
 
 <script>
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => e.preventDefault());
+
 // ── State ──────────────────────────────────────────────────
-let unlockFile = null;
+let unlockFiles = [];
+let unlockDirectory = null;
 let splitFile  = null;
 let mergeFiles = [];
 let wordFile   = null;
@@ -382,12 +393,20 @@ function setupDrop(dropId, inputId, multi, onFiles) {
   const drop  = document.getElementById(dropId);
   const input = document.getElementById(inputId);
 
-  // Click opens file picker (but not via the hidden input click — we rely on the
-  // input covering the drop area with opacity:0 so it captures clicks natively)
+  input.setAttribute('aria-label', 'Seleccionar archivo para ' + dropId.split('-')[0]);
+  function receive(files) {
+    const resultId = dropId.replace('-drop', '-result');
+    if (document.getElementById(dropId.replace('-drop', '-btn')).disabled) return;
+    if (!files.length) return;
+    if (!multi && files.length > 1) return showErr(resultId, 'Seleccioná un solo archivo para esta operación.');
+    if (!files.every(isSupportedForDrop(inputId))) return showErr(resultId, 'Formato no compatible. Revisá los formatos indicados en esta sección.');
+    if (files.some(f => !f.size)) return showErr(resultId, 'El archivo está vacío.');
+    if ((inputId === 'unlock-file' ? Math.max(...files.map(f => f.size)) : files.reduce((sum, f) => sum + f.size, 0)) > 200 * 1024 * 1024) return showErr(resultId, 'El límite por operación es de 200 MB.');
+    onFiles(files);
+  }
 
   input.addEventListener('change', () => {
-    const files = Array.from(input.files).filter(isSupportedForDrop(inputId));
-    if (files.length) onFiles(files);
+    receive(Array.from(input.files));
     input.value = '';
   });
 
@@ -396,47 +415,167 @@ function setupDrop(dropId, inputId, multi, onFiles) {
   drop.addEventListener('drop', e => {
     e.preventDefault();
     drop.classList.remove('over');
-    const files = Array.from(e.dataTransfer.files).filter(isSupportedForDrop(inputId));
-    if (files.length) onFiles(files);
+    receive(Array.from(e.dataTransfer.files));
   });
 }
 
 function isPDF(f) { return f.name.toLowerCase().endsWith('.pdf'); }
 function isMergeFile(f) { return /\.(pdf|png|jpe?g)$/i.test(f.name); }
-function isWordFile(f) { return /\.(docx?|rtf|odt)$/i.test(f.name); }
+function isWordFile(f) { return /\.(png|jpe?g|docx?|rtf|odt)$/i.test(f.name); }
 function isSupportedForDrop(inputId) {
   if (inputId === 'word-file') return isWordFile;
   return inputId === 'merge-file' ? isMergeFile : isPDF;
 }
 
 // ── UNLOCK ────────────────────────────────────────────────
-setupDrop('unlock-drop', 'unlock-file', false, files => {
-  unlockFile = files[0];
-  showBadge('unlock-badge', unlockFile.name);
+setupDrop('unlock-drop', 'unlock-file', true, files => {
+  unlockFiles = files;
+  unlockDirectory = null;
+  document.getElementById('unlock-folder-status').textContent = 'Autorizá la carpeta que contiene estos PDFs para guardar las copias allí.';
+  renderUnlockFiles();
   clearResult('unlock-result');
 });
 
+function renderUnlockFiles() {
+  showBadge('unlock-badge', unlockFiles.length + ' PDF(s) seleccionados');
+  const list = document.getElementById('unlock-list');
+  list.replaceChildren();
+  unlockFiles.forEach((file, index) => {
+    const row = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = file.name;
+    const remove = document.createElement('button');
+    remove.className = 'remove-btn';
+    remove.textContent = '✕';
+    remove.setAttribute('aria-label', 'Quitar ' + file.name);
+    remove.onclick = () => {
+      if (document.getElementById('unlock-btn').disabled) return;
+      unlockFiles.splice(index, 1);
+      renderUnlockFiles();
+      clearResult('unlock-result');
+    };
+    row.append(name, remove);
+    list.appendChild(row);
+  });
+}
+
+async function chooseUnlockFolder() {
+  if (!window.showDirectoryPicker) {
+    showErr('unlock-result', 'Este navegador no permite guardar en la carpeta original. Abrí la app en Chrome/Edge o usá el modo terminal: opción 1, arrastrá todos los PDFs y escribí la contraseña una sola vez.');
+    return false;
+  }
+  const btn = document.getElementById('unlock-btn');
+  const folderBtn = document.getElementById('unlock-folder-btn');
+  btn.disabled = folderBtn.disabled = true;
+  try {
+    const directory = await window.showDirectoryPicker({ mode: 'readwrite' });
+    if (!unlockFiles.length) {
+      const files = [];
+      for await (const handle of directory.values()) {
+        if (handle.kind === 'file' && /\.pdf$/i.test(handle.name) && !/_unlocked(?:_\d+)?\.pdf$/i.test(handle.name)) {
+          files.push(await handle.getFile());
+        }
+      }
+      if (!files.length) throw new Error('No hay PDFs originales en esta carpeta.');
+      unlockFiles = files.sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      // Verify that the selected folder contains the actual input contents.
+      for (const file of unlockFiles) {
+        let local;
+        try { local = await (await directory.getFileHandle(file.name)).getFile(); }
+        catch (error) { throw new Error(`La carpeta no contiene ${file.name}. Elegí su carpeta original.`); }
+        if (local.size !== file.size) throw new Error(`El archivo ${file.name} no coincide con el original.`);
+        const digest = async f => new Uint8Array(await crypto.subtle.digest('SHA-256', await f.arrayBuffer()));
+        const [first, second] = await Promise.all([digest(file), digest(local)]);
+        if (!first.every((byte, i) => byte === second[i])) throw new Error(`El archivo ${file.name} no coincide con el original.`);
+      }
+    }
+    unlockDirectory = directory;
+    document.getElementById('unlock-folder-status').textContent = `Destino: ${directory.name}. Cada PDF se guardará aquí con el sufijo _unlocked.`;
+    renderUnlockFiles();
+    clearResult('unlock-result');
+    return true;
+  } catch (error) {
+    if (error.name !== 'AbortError') showErr('unlock-result', error.message);
+    return false;
+  } finally {
+    btn.disabled = folderBtn.disabled = false;
+  }
+}
+
+async function saveUnlockedCopy(directory, name, blob) {
+  const stem = name.replace(/\.pdf$/i, '');
+  let candidate = name;
+  // Include directories in the collision check, too.
+  const existing = new Set();
+  for await (const entry of directory.values()) existing.add(entry.name.toLowerCase());
+  for (let i = 1; existing.has(candidate.toLowerCase()); i++) candidate = `${stem}_${i}.pdf`;
+  const handle = await directory.getFileHandle(candidate, { create: true });
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(blob);
+    await writable.close();
+  } catch (error) {
+    await writable.abort().catch(() => {});
+    throw error;
+  }
+  return candidate;
+}
+
 async function doUnlock() {
-  if (!unlockFile) return showErr('unlock-result', 'Seleccioná un PDF primero.');
+  if (!unlockFiles.length) return showErr('unlock-result', 'Arrastrá los PDFs o elegí su carpeta original.');
+  if (!unlockDirectory && !await chooseUnlockFolder()) return;
   const password = document.getElementById('unlock-pass').value;
   const btn = document.getElementById('unlock-btn');
-
+  const folderBtn = document.getElementById('unlock-folder-btn');
+  const files = [...unlockFiles];
+  const directory = unlockDirectory;
   setLoading(btn, 'Desbloqueando…');
+  folderBtn.disabled = true;
   clearResult('unlock-result');
-
-  const form = new FormData();
-  form.append('file', unlockFile);
-  form.append('password', password);
-
+  const result = document.getElementById('unlock-result');
+  result.className = 'result ok';
+  result.style.display = 'block';
+  const summary = document.createElement('p');
+  result.appendChild(summary);
+  let saved = 0;
+  // Process sequentially so a large batch doesn't need one huge upload.
   try {
-    const res  = await fetch('/api/unlock', { method: 'POST', body: form });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-    showOK('unlock-result', data.filename, data.download_url);
-  } catch(e) {
-    showErr('unlock-result', e.message);
+    for (const [index, file] of files.entries()) {
+      summary.textContent = `Procesando ${index + 1} de ${files.length}…`;
+      const row = document.createElement('p');
+      result.appendChild(row);
+      let output;
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('password', password);
+        const res = await fetch('/api/unlock', { method: 'POST', body: form });
+        const data = await res.json().catch(() => { throw new Error('El servidor no pudo procesar el archivo.'); });
+        if (!res.ok) throw new Error((data.errors || [data.error]).join(' · '));
+        output = data.outputs[0];
+        const download = await fetch(output.download_url);
+        if (!download.ok) throw new Error('No se pudo recuperar el PDF desbloqueado.');
+        const name = await saveUnlockedCopy(directory, file.name.replace(/\.pdf$/i, '') + '_unlocked.pdf', await download.blob());
+        saved++;
+        row.textContent = `✓ ${name} guardado en ${directory.name}`;
+      } catch (error) {
+        row.textContent = `✗ ${file.name}: ${error.message}`;
+        if (output) {
+          const retry = document.createElement('a');
+          retry.className = 'dl-link';
+          retry.href = output.download_url;
+          retry.download = output.filename;
+          retry.textContent = 'Recuperar PDF por separado';
+          row.appendChild(retry);
+        }
+      }
+    }
+    summary.textContent = `${saved} de ${files.length} PDFs guardados en ${directory.name}. Los originales se conservaron.`;
+    if (saved !== files.length) result.className = 'result err';
   } finally {
     resetBtn(btn, 'Quitar contraseña');
+    folderBtn.disabled = false;
   }
 }
 
@@ -466,10 +605,11 @@ async function doSplit() {
   form.append('file', splitFile);
   form.append('mode', mode);
   form.append('spec', spec);
+  form.append('password', document.getElementById('split-pass').value);
 
   try {
     const res  = await fetch('/api/split', { method: 'POST', body: form });
-    const data = await res.json();
+    const data = await res.json().catch(() => { throw new Error('El servidor no pudo procesar el archivo. Intentá de nuevo.'); });
     if (!res.ok) throw new Error(data.error);
     showOK('split-result', data.filename, data.download_url);
   } catch(e) {
@@ -482,7 +622,7 @@ async function doSplit() {
 // ── MERGE ─────────────────────────────────────────────────
 setupDrop('merge-drop', 'merge-file', true, files => {
   files.forEach(f => {
-    if (!mergeFiles.find(x => x.name === f.name)) mergeFiles.push(f);
+    mergeFiles.push(f);
   });
   renderMergeList();
   clearResult('merge-result');
@@ -505,7 +645,8 @@ function removeMerge(idx) {
 }
 
 async function doMerge() {
-  if (mergeFiles.length < 2) return showErr('merge-result', 'Necesitás al menos 2 archivos.');
+  if (mergeFiles.reduce((sum, file) => sum + file.size, 0) > 200 * 1024 * 1024) return showErr('merge-result', 'Los archivos superan el límite de 200 MB por operación.');
+  if (mergeFiles.length < 2 && !(mergeFiles.length === 1 && !isPDF(mergeFiles[0]))) return showErr('merge-result', 'Seleccioná dos archivos para combinar o una imagen para convertir.');
   const btn = document.getElementById('merge-btn');
 
   setLoading(btn, 'Combinando…');
@@ -516,7 +657,7 @@ async function doMerge() {
 
   try {
     const res  = await fetch('/api/merge', { method: 'POST', body: form });
-    const data = await res.json();
+    const data = await res.json().catch(() => { throw new Error('El servidor no pudo procesar el archivo. Intentá de nuevo.'); });
     if (!res.ok) throw new Error(data.error);
     showOK('merge-result', data.filename, data.download_url);
   } catch(e) {
@@ -534,7 +675,7 @@ setupDrop('word-drop', 'word-file', false, files => {
 });
 
 async function doWordToPdf() {
-  if (!wordFile) return showErr('word-result', 'Seleccioná un documento primero.');
+  if (!wordFile) return showErr('word-result', 'Seleccioná una imagen o documento primero.');
   const btn = document.getElementById('word-btn');
 
   setLoading(btn, 'Convirtiendo…');
@@ -544,8 +685,8 @@ async function doWordToPdf() {
   form.append('file', wordFile);
 
   try {
-    const res  = await fetch('/api/word-to-pdf', { method: 'POST', body: form });
-    const data = await res.json();
+    const res  = await fetch('/api/convert-to-pdf', { method: 'POST', body: form });
+    const data = await res.json().catch(() => { throw new Error('El servidor no pudo procesar el archivo. Intentá de nuevo.'); });
     if (!res.ok) throw new Error(data.error);
     showOK('word-result', data.filename, data.download_url);
   } catch(e) {
@@ -567,7 +708,7 @@ function showOK(id, filename, url) {
   el.className = 'result ok';
   el.style.display = 'block';
   el.innerHTML = `✓ Listo: <strong>${escHtml(filename)}</strong><br>
-    <a class="dl-link" href="${url}" download>⬇ Descargar</a>`;
+    <a class="dl-link" href="${escHtml(url)}" download>⬇ Descargar</a>`;
 }
 
 function showErr(id, msg) {
@@ -594,7 +735,7 @@ function resetBtn(btn, text) {
 }
 
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
 </body>

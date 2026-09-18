@@ -66,12 +66,17 @@ def parse_ranges(spec: str, total_pages: int) -> list[int]:
             if n < 1 or n > total_pages:
                 raise ValueError(f"Página fuera de rango: {n}")
             pages.append(n)
+    if not pages:
+        raise ValueError("Indicá al menos una página válida.")
     return pages
 
 
 def unlock_pdf_file(src: Path, password: str, out_dir: Path = None) -> tuple[Path | None, str]:
     """Devuelve (ruta_salida, error). ruta_salida es None si hay error."""
-    reader = PdfReader(str(src))
+    try:
+        reader = PdfReader(str(src))
+    except Exception as e:
+        return None, pdf_processing_error("No se pudo leer el PDF", e)
     if not reader.is_encrypted:
         return None, "El PDF no está protegido."
     try:
@@ -106,7 +111,12 @@ def split_pdf_file(
     mode '2' → por rangos (spec = "1-3,5")
     Devuelve (lista_de_salidas, error).
     """
-    reader = PdfReader(str(src))
+    if mode not in {"1", "2"}:
+        return [], "Modo de división inválido."
+    try:
+        reader = PdfReader(str(src))
+    except Exception as e:
+        return [], pdf_processing_error("No se pudo leer el PDF", e)
     if reader.is_encrypted:
         if not password:
             return [], "El PDF está protegido. Proporcioná una contraseña."
@@ -117,7 +127,12 @@ def split_pdf_file(
         if result == 0:
             return [], "Contraseña incorrecta."
 
-    total = len(reader.pages)
+    try:
+        total = len(reader.pages)
+    except Exception as e:
+        return [], pdf_processing_error("No se pudo leer el PDF", e)
+    if not total:
+        return [], "El PDF no contiene páginas."
     directory = out_dir or src.parent
     outputs: list[Path] = []
 
@@ -126,7 +141,7 @@ def split_pdf_file(
             for i, page in enumerate(reader.pages, start=1):
                 writer = PdfWriter()
                 writer.add_page(page)
-                dst = directory / f"{src.stem}_p{i:03d}.pdf"
+                dst = _out_path(src.name, f"p{i:03d}", directory)
                 with open(dst, "wb") as f:
                     writer.write(f)
                 outputs.append(dst)
@@ -211,6 +226,8 @@ def merge_pdf_files(
     Acepta PDFs e imágenes PNG/JPG/JPEG; cada imagen se agrega como una página.
     Devuelve (ruta_salida, error).
     """
+    if len(files) == 1 and files[0][0].suffix.lower() in IMAGE_SUFFIXES:
+        return image_to_pdf_file(files[0][0], out_dir)
     if len(files) < 2:
         return None, "Se necesitan al menos 2 archivos para combinar."
 
@@ -226,7 +243,10 @@ def merge_pdf_files(
                 return None, err
             continue
 
-        reader = PdfReader(str(src))
+        try:
+            reader = PdfReader(str(src))
+        except Exception as e:
+            return None, pdf_processing_error(f"No se pudo leer {src.name}", e)
         if reader.is_encrypted:
             if not password:
                 return None, f"'{src.name}' está protegido. Desbloquealo primero con Unlock."
@@ -251,6 +271,30 @@ def merge_pdf_files(
         dst.unlink(missing_ok=True)
         return None, pdf_processing_error("No se pudo crear el PDF combinado", e)
     return dst, ""
+
+
+def image_to_pdf_file(src: Path, out_dir: Path = None) -> tuple[Path | None, str]:
+    """Convierte una imagen en una hoja carta, centrada y sin recortar."""
+    if src.suffix.lower() not in IMAGE_SUFFIXES:
+        return None, "Formato no soportado. Usá PNG, JPG o JPEG."
+    writer = PdfWriter()
+    error = _add_image_as_pdf_page(writer, src)
+    if error:
+        return None, error
+    dst = _out_path(src.name, "converted", out_dir or src.parent)
+    try:
+        with dst.open("wb") as stream:
+            writer.write(stream)
+    except Exception as e:
+        dst.unlink(missing_ok=True)
+        return None, pdf_processing_error("No se pudo guardar el PDF", e)
+    return dst, ""
+
+
+def convert_to_pdf_file(src: Path, out_dir: Path = None) -> tuple[Path | None, str]:
+    if src.suffix.lower() in IMAGE_SUFFIXES:
+        return image_to_pdf_file(src, out_dir)
+    return word_to_pdf_file(src, out_dir)
 
 
 def _add_image_as_pdf_page(writer: PdfWriter, src: Path) -> str:
@@ -287,7 +331,7 @@ def _image_on_letter_page(img):
     max_height = canvas_size[1] - (margin * 2)
 
     ratio = min(max_width / image.width, max_height / image.height)
-    target_size = (round(image.width * ratio), round(image.height * ratio))
+    target_size = (max(1, round(image.width * ratio)), max(1, round(image.height * ratio)))
     if target_size != image.size:
         image = image.resize(target_size, Image.Resampling.LANCZOS)
 
